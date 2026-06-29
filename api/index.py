@@ -52,6 +52,10 @@ class ProfileUpdate(BaseModel):
     github: Optional[str] = None
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 class ForgotPasswordRequest(BaseModel):
     email: str
 
@@ -82,7 +86,8 @@ async def signup(req: AuthRequest):
         if not res.user:
             raise HTTPException(status_code=400, detail="Signup failed")
         token = res.session.access_token if res.session else None
-        return {"access_token": token, "email": res.user.email}
+        refresh = res.session.refresh_token if res.session else None
+        return {"access_token": token, "refresh_token": refresh, "email": res.user.email}
     except HTTPException:
         raise
     except Exception as e:
@@ -93,9 +98,26 @@ async def signup(req: AuthRequest):
 async def login(req: AuthRequest):
     try:
         res = supabase.auth.sign_in_with_password({"email": req.email, "password": req.password})
-        return {"access_token": res.session.access_token, "email": res.user.email}
+        return {
+            "access_token": res.session.access_token,
+            "refresh_token": res.session.refresh_token,
+            "email": res.user.email,
+        }
     except Exception:
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
+
+
+@app.post("/auth/refresh")
+async def refresh_token(req: RefreshRequest):
+    try:
+        res = supabase.auth.refresh_session(req.refresh_token)
+        return {
+            "access_token": res.session.access_token,
+            "refresh_token": res.session.refresh_token,
+            "email": res.user.email,
+        }
+    except Exception:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
 
 
 @app.post("/auth/forgot-password")
