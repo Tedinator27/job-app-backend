@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Header, Request
+﻿from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from supabase import create_client, Client, ClientOptions
@@ -177,7 +177,8 @@ async def forgot_password(req: ForgotPasswordRequest):
         detail = e.read().decode("utf-8", errors="replace")
         raise HTTPException(status_code=400, detail=f"Supabase error {e.code}: {detail}")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+        reason = getattr(e, 'reason', None)
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {repr(e)} | reason={reason} | url={url}")
 
 
 @app.post("/auth/reset-password")
@@ -367,6 +368,7 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
+
 
 
 
