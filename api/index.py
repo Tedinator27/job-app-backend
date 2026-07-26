@@ -135,6 +135,20 @@ def debug_network():
         results["http"] = f"ok: status {r.status}"
     except Exception as e:
         results["http"] = f"fail: {type(e).__name__}: {e}"
+    # Test 4: Supabase host specifically
+    supa_host = os.environ.get("SUPABASE_URL", "").replace("https://", "").rstrip("/")
+    try:
+        s2 = socket.create_connection((supa_host, 443), timeout=5)
+        s2.close()
+        results["supabase_socket"] = "ok"
+    except Exception as e:
+        results["supabase_socket"] = f"fail: {type(e).__name__}: {e}"
+    try:
+        r2 = urllib.request.urlopen(os.environ["SUPABASE_URL"] + "/auth/v1/health", timeout=5)
+        results["supabase_http"] = f"ok: status {r2.status}"
+    except Exception as e:
+        body = getattr(e, 'read', lambda: b'')()
+        results["supabase_http"] = f"fail: {type(e).__name__}: {e} | body={body[:200]}"
     return results
 
 
@@ -394,6 +408,7 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
+
 
 
 
