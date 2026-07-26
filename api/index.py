@@ -154,7 +154,7 @@ async def forgot_password(req: ForgotPasswordRequest):
         )
         return {"ok": True}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
 
 
 @app.post("/auth/reset-password")
@@ -336,4 +336,5 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
+
 
