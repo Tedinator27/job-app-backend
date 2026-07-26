@@ -158,7 +158,7 @@ async def refresh_token(req: RefreshRequest):
 
 @app.post("/auth/forgot-password")
 async def forgot_password(req: ForgotPasswordRequest):
-    import urllib.request
+    import urllib.request, urllib.error
     import json as _json
     try:
         url = os.environ["SUPABASE_URL"].rstrip("/") + "/auth/v1/recover"
@@ -168,13 +168,16 @@ async def forgot_password(req: ForgotPasswordRequest):
         }
         body = _json.dumps({
             "email": req.email,
-            "gotrue_meta_security": {"captcha_token": ""},
+            "redirect_to": "https://job-app-assistant-psi.vercel.app/reset",
         }).encode()
         http_req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         urllib.request.urlopen(http_req, timeout=10)
         return {"ok": True}
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise HTTPException(status_code=400, detail=f"Supabase error {e.code}: {detail}")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
 
 
 @app.post("/auth/reset-password")
@@ -364,4 +367,6 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
+
+
 
