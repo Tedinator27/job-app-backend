@@ -112,6 +112,32 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/network")
+def debug_network():
+    import urllib.request, urllib.error, socket
+    results = {}
+    # Test 1: DNS resolution
+    try:
+        ip = socket.getaddrinfo("google.com", 443)[0][4][0]
+        results["dns"] = f"ok: google.com -> {ip}"
+    except Exception as e:
+        results["dns"] = f"fail: {e}"
+    # Test 2: Raw socket connect
+    try:
+        s = socket.create_connection(("google.com", 443), timeout=5)
+        s.close()
+        results["socket"] = "ok"
+    except Exception as e:
+        results["socket"] = f"fail: {e}"
+    # Test 3: HTTP request
+    try:
+        r = urllib.request.urlopen("https://httpbin.org/get", timeout=5)
+        results["http"] = f"ok: status {r.status}"
+    except Exception as e:
+        results["http"] = f"fail: {type(e).__name__}: {e}"
+    return results
+
+
 @app.post("/auth/signup")
 async def signup(req: AuthRequest):
     try:
@@ -368,6 +394,7 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
+
 
 
 
