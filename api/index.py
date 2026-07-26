@@ -28,6 +28,7 @@ CORS_HEADERS = {
     "Access-Control-Allow-Headers": "*",
 }
 
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     traceback.print_exc()
@@ -36,6 +37,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": f"{type(exc).__name__}: {exc}"},
         headers=CORS_HEADERS,
     )
+
 
 _client_opts = ClientOptions(auto_refresh_token=False, persist_session=False)
 
@@ -65,7 +67,7 @@ class AuthRequest(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    kind: str  # coverLetter | resume | questions
+    kind: str
     system_prompt: str
     user_prompt: str
     model: str
@@ -112,64 +114,6 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/debug/network")
-def debug_network():
-    import urllib.request, urllib.error, socket
-    results = {}
-    # Test 1: DNS resolution
-    try:
-        ip = socket.getaddrinfo("google.com", 443)[0][4][0]
-        results["dns"] = f"ok: google.com -> {ip}"
-    except Exception as e:
-        results["dns"] = f"fail: {e}"
-    # Test 2: Raw socket connect
-    try:
-        s = socket.create_connection(("google.com", 443), timeout=5)
-        s.close()
-        results["socket"] = "ok"
-    except Exception as e:
-        results["socket"] = f"fail: {e}"
-    # Test 3: HTTP request
-    try:
-        r = urllib.request.urlopen("https://httpbin.org/get", timeout=5)
-        results["http"] = f"ok: status {r.status}"
-    except Exception as e:
-        results["http"] = f"fail: {type(e).__name__}: {e}"
-    # Test 4: Supabase host specifically
-    supa_host = os.environ.get("SUPABASE_URL", "").replace("https://", "").rstrip("/")
-    try:
-        s2 = socket.create_connection((supa_host, 443), timeout=5)
-        s2.close()
-        results["supabase_socket"] = "ok"
-    except Exception as e:
-        results["supabase_socket"] = f"fail: {type(e).__name__}: {e}"
-    try:
-        r2 = urllib.request.urlopen(os.environ["SUPABASE_URL"] + "/auth/v1/health", timeout=5)
-        results["supabase_http"] = f"ok: status {r2.status}"
-    except Exception as e:
-        body = getattr(e, 'read', lambda: b'')()
-        results["supabase_http"] = f"fail: {type(e).__name__}: {e} | body={body[:200]}"
-    # Test 5: DNS resolution for Supabase specifically
-    try:
-        addrs = socket.getaddrinfo(supa_host, 443)
-        results["supabase_dns"] = [f"{a[0].name} {a[4][0]}" for a in addrs]
-    except Exception as e:
-        results["supabase_dns"] = f"fail: {e}"
-    # Test 6: Try connecting to Supabase via explicit IPv4
-    try:
-        addrs_v4 = socket.getaddrinfo(supa_host, 443, socket.AF_INET)
-        if addrs_v4:
-            ip = addrs_v4[0][4][0]
-            s3 = socket.create_connection((ip, 443), timeout=5)
-            s3.close()
-            results["supabase_ipv4"] = f"ok: connected to {ip}"
-        else:
-            results["supabase_ipv4"] = "no IPv4 addresses found"
-    except Exception as e:
-        results["supabase_ipv4"] = f"fail: {type(e).__name__}: {e}"
-    return results
-
-
 @app.post("/auth/signup")
 async def signup(req: AuthRequest):
     try:
@@ -196,8 +140,8 @@ async def login(req: AuthRequest):
             "refresh_token": res.session.refresh_token,
             "email": res.user.email,
         }
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Login error: {type(e).__name__}: {e}")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Incorrect email or password.")
 
 
 @app.post("/auth/refresh")
@@ -215,28 +159,16 @@ async def refresh_token(req: RefreshRequest):
 
 
 @app.post("/auth/forgot-password")
-def forgot_password(req: ForgotPasswordRequest):
-    import urllib.request, urllib.error
-    import json as _json
+async def forgot_password(req: ForgotPasswordRequest):
     try:
-        url = os.environ["SUPABASE_URL"].rstrip("/") + "/auth/v1/recover"
-        headers = {
-            "Content-Type": "application/json",
-            "apikey": os.environ["SUPABASE_ANON_KEY"],
-        }
-        body = _json.dumps({
-            "email": req.email,
-            "redirect_to": "https://job-app-assistant-psi.vercel.app/reset",
-        }).encode()
-        http_req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        urllib.request.urlopen(http_req, timeout=10)
+        supabase = get_supabase()
+        supabase.auth.reset_password_for_email(
+            req.email,
+            {"redirect_to": "https://job-app-assistant-psi.vercel.app/reset"},
+        )
         return {"ok": True}
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise HTTPException(status_code=400, detail=f"Supabase error {e.code}: {detail}")
     except Exception as e:
-        reason = getattr(e, 'reason', None)
-        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {repr(e)} | reason={reason} | url={url}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/auth/reset-password")
@@ -426,12 +358,3 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
-
-
-
-
-
-
-
-
-
