@@ -157,7 +157,7 @@ async def refresh_token(req: RefreshRequest):
 
 
 @app.post("/auth/forgot-password")
-async def forgot_password(req: ForgotPasswordRequest):
+def forgot_password(req: ForgotPasswordRequest):
     import urllib.request, urllib.error
     import json as _json
     try:
@@ -368,6 +368,7 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
+
 
 
 
