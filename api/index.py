@@ -1,12 +1,13 @@
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from supabase import create_client, Client
+from fastapi.responses import HTMLResponse, JSONResponse
+from supabase import create_client, Client, ClientOptions
 from anthropic import Anthropic
 from pydantic import BaseModel
 from typing import Optional
 from mangum import Mangum
 import os
+import traceback
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,13 +22,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "*",
+    "Access-Control-Allow-Headers": "*",
+}
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"{type(exc).__name__}: {exc}"},
+        headers=CORS_HEADERS,
+    )
+
+_client_opts = ClientOptions(auto_refresh_token=False, persist_session=False)
+
 supabase: Client = create_client(
     os.environ["SUPABASE_URL"],
     os.environ["SUPABASE_ANON_KEY"],
+    options=_client_opts,
 )
 supabase_admin: Client = create_client(
     os.environ["SUPABASE_URL"],
     os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+    options=_client_opts,
 )
 claude = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -69,7 +89,12 @@ async def current_user(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing token")
     try:
-        return supabase.auth.get_user(authorization.split(" ", 1)[1]).user
+        user = supabase.auth.get_user(authorization.split(" ", 1)[1]).user
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return user
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
@@ -247,6 +272,11 @@ async def generate(req: GenerateRequest, user=Depends(current_user)):
             messages=[{"role": "user", "content": req.user_prompt}],
         )
         output = msg.content[0].text
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
         supabase_admin.table("applications").insert({
             "user_id": str(user.id),
             "kind": req.kind,
@@ -254,43 +284,56 @@ async def generate(req: GenerateRequest, user=Depends(current_user)):
             "role": req.role,
             "output": output,
         }).execute()
-        return {"output": output}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        pass
+
+    return {"output": output}
 
 
 @app.get("/history")
 async def get_history(user=Depends(current_user)):
-    res = (
-        supabase_admin.table("applications")
-        .select("id, kind, company, role, created_at")
-        .eq("user_id", str(user.id))
-        .order("created_at", desc=True)
-        .limit(50)
-        .execute()
-    )
-    return res.data or []
+    try:
+        res = (
+            supabase_admin.table("applications")
+            .select("id, kind, company, role, created_at")
+            .eq("user_id", str(user.id))
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        return res.data or []
+    except Exception:
+        return []
 
 
 @app.get("/history/{item_id}")
 async def get_history_item(item_id: str, user=Depends(current_user)):
-    res = (
-        supabase_admin.table("applications")
-        .select("*")
-        .eq("id", item_id)
-        .eq("user_id", str(user.id))
-        .limit(1)
-        .execute()
-    )
-    if not res.data:
+    try:
+        res = (
+            supabase_admin.table("applications")
+            .select("*")
+            .eq("id", item_id)
+            .eq("user_id", str(user.id))
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Not found")
+        return res.data[0]
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(status_code=404, detail="Not found")
-    return res.data[0]
 
 
 @app.delete("/history/{item_id}")
 async def delete_history_item(item_id: str, user=Depends(current_user)):
-    supabase_admin.table("applications").delete().eq("id", item_id).eq("user_id", str(user.id)).execute()
+    try:
+        supabase_admin.table("applications").delete().eq("id", item_id).eq("user_id", str(user.id)).execute()
+    except Exception:
+        pass
     return {"ok": True}
 
 
 handler = Mangum(app, lifespan="off")
+
