@@ -138,8 +138,8 @@ async def login(req: AuthRequest):
             "refresh_token": res.session.refresh_token,
             "email": res.user.email,
         }
-    except Exception:
-        raise HTTPException(status_code=401, detail="Incorrect email or password.")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Login error: {type(e).__name__}: {e}")
 
 
 @app.post("/auth/refresh")
@@ -368,6 +368,7 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
+
 
 
 
