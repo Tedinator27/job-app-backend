@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Header, Request
+﻿from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from supabase import create_client, Client, ClientOptions
@@ -39,16 +39,23 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 _client_opts = ClientOptions(auto_refresh_token=False, persist_session=False)
 
-supabase: Client = create_client(
-    os.environ["SUPABASE_URL"],
-    os.environ["SUPABASE_ANON_KEY"],
-    options=_client_opts,
-)
-supabase_admin: Client = create_client(
-    os.environ["SUPABASE_URL"],
-    os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-    options=_client_opts,
-)
+
+def get_supabase() -> Client:
+    return create_client(
+        os.environ["SUPABASE_URL"],
+        os.environ["SUPABASE_ANON_KEY"],
+        options=_client_opts,
+    )
+
+
+def get_supabase_admin() -> Client:
+    return create_client(
+        os.environ["SUPABASE_URL"],
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+        options=_client_opts,
+    )
+
+
 claude = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 
@@ -89,6 +96,7 @@ async def current_user(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing token")
     try:
+        supabase = get_supabase()
         user = supabase.auth.get_user(authorization.split(" ", 1)[1]).user
         if not user:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -107,6 +115,7 @@ async def health():
 @app.post("/auth/signup")
 async def signup(req: AuthRequest):
     try:
+        supabase = get_supabase()
         res = supabase.auth.sign_up({"email": req.email, "password": req.password})
         if not res.user:
             raise HTTPException(status_code=400, detail="Signup failed")
@@ -122,6 +131,7 @@ async def signup(req: AuthRequest):
 @app.post("/auth/login")
 async def login(req: AuthRequest):
     try:
+        supabase = get_supabase()
         res = supabase.auth.sign_in_with_password({"email": req.email, "password": req.password})
         return {
             "access_token": res.session.access_token,
@@ -135,6 +145,7 @@ async def login(req: AuthRequest):
 @app.post("/auth/refresh")
 async def refresh_token(req: RefreshRequest):
     try:
+        supabase = get_supabase()
         res = supabase.auth.refresh_session(req.refresh_token)
         return {
             "access_token": res.session.access_token,
@@ -148,18 +159,21 @@ async def refresh_token(req: RefreshRequest):
 @app.post("/auth/forgot-password")
 async def forgot_password(req: ForgotPasswordRequest):
     try:
+        supabase = get_supabase()
         supabase.auth.reset_password_for_email(
             req.email,
             {"redirect_to": "https://job-app-assistant-psi.vercel.app/reset"},
         )
         return {"ok": True}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/auth/reset-password")
 async def reset_password(req: ResetPasswordRequest):
     try:
+        supabase = get_supabase()
+        supabase_admin = get_supabase_admin()
         user_res = supabase.auth.get_user(req.access_token)
         if not user_res.user:
             raise HTTPException(status_code=401, detail="Invalid or expired reset link.")
@@ -181,7 +195,7 @@ async def reset_page():
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Reset Password — Job Apply Assistant</title>
+  <title>Reset Password - Job Apply Assistant</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
@@ -226,7 +240,7 @@ async def reset_page():
     if(pw.length<8){msg.className='msg error';msg.textContent='Password must be at least 8 characters.';return;}
     if(pw!==pw2){msg.className='msg error';msg.textContent='Passwords do not match.';return;}
     document.getElementById('btn').disabled=true;
-    document.getElementById('btn').textContent='Saving…';
+    document.getElementById('btn').textContent='Saving...';
     try{
       const res=await fetch('/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:token,new_password:pw})});
       const data=await res.json();
@@ -247,6 +261,7 @@ async def reset_page():
 
 @app.get("/profile")
 async def get_profile(user=Depends(current_user)):
+    supabase_admin = get_supabase_admin()
     res = supabase_admin.table("profiles").select("*").eq("user_id", str(user.id)).limit(1).execute()
     if not res.data:
         return {"resume": "", "linkedin": "", "github": ""}
@@ -256,6 +271,7 @@ async def get_profile(user=Depends(current_user)):
 
 @app.put("/profile")
 async def update_profile(body: ProfileUpdate, user=Depends(current_user)):
+    supabase_admin = get_supabase_admin()
     data = {k: v for k, v in body.model_dump().items() if v is not None}
     data["user_id"] = str(user.id)
     supabase_admin.table("profiles").upsert(data, on_conflict="user_id").execute()
@@ -264,6 +280,7 @@ async def update_profile(body: ProfileUpdate, user=Depends(current_user)):
 
 @app.post("/generate")
 async def generate(req: GenerateRequest, user=Depends(current_user)):
+    supabase_admin = get_supabase_admin()
     try:
         msg = claude.messages.create(
             model=req.model,
@@ -292,6 +309,7 @@ async def generate(req: GenerateRequest, user=Depends(current_user)):
 
 @app.get("/history")
 async def get_history(user=Depends(current_user)):
+    supabase_admin = get_supabase_admin()
     try:
         res = (
             supabase_admin.table("applications")
@@ -308,6 +326,7 @@ async def get_history(user=Depends(current_user)):
 
 @app.get("/history/{item_id}")
 async def get_history_item(item_id: str, user=Depends(current_user)):
+    supabase_admin = get_supabase_admin()
     try:
         res = (
             supabase_admin.table("applications")
@@ -328,6 +347,7 @@ async def get_history_item(item_id: str, user=Depends(current_user)):
 
 @app.delete("/history/{item_id}")
 async def delete_history_item(item_id: str, user=Depends(current_user)):
+    supabase_admin = get_supabase_admin()
     try:
         supabase_admin.table("applications").delete().eq("id", item_id).eq("user_id", str(user.id)).execute()
     except Exception:
@@ -336,5 +356,3 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
-
-
