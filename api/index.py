@@ -149,6 +149,24 @@ def debug_network():
     except Exception as e:
         body = getattr(e, 'read', lambda: b'')()
         results["supabase_http"] = f"fail: {type(e).__name__}: {e} | body={body[:200]}"
+    # Test 5: DNS resolution for Supabase specifically
+    try:
+        addrs = socket.getaddrinfo(supa_host, 443)
+        results["supabase_dns"] = [f"{a[0].name} {a[4][0]}" for a in addrs]
+    except Exception as e:
+        results["supabase_dns"] = f"fail: {e}"
+    # Test 6: Try connecting to Supabase via explicit IPv4
+    try:
+        addrs_v4 = socket.getaddrinfo(supa_host, 443, socket.AF_INET)
+        if addrs_v4:
+            ip = addrs_v4[0][4][0]
+            s3 = socket.create_connection((ip, 443), timeout=5)
+            s3.close()
+            results["supabase_ipv4"] = f"ok: connected to {ip}"
+        else:
+            results["supabase_ipv4"] = "no IPv4 addresses found"
+    except Exception as e:
+        results["supabase_ipv4"] = f"fail: {type(e).__name__}: {e}"
     return results
 
 
@@ -408,6 +426,7 @@ async def delete_history_item(item_id: str, user=Depends(current_user)):
 
 
 handler = Mangum(app, lifespan="off")
+
 
 
 
